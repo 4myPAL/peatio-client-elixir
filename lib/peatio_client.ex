@@ -16,20 +16,24 @@ defmodule PeatioClient do
     Map.put ticker, :at, body["at"]
   end
 
-  def trades(market) do
-    body = build_api_request("/trades") |> set_payload([market: market]) |> gogogo!
+  def trades(market, from \\ nil) do
+    payload = [market: market]
 
-    body |> Enum.map fn
-      (trade) ->
-        %{
-          id: trade["id"], 
-          at: trade["at"], 
-          price: Decimal.new(trade["price"]), 
-          volume: Decimal.new(trade["volume"]),
-          side: String.to_atom(trade["side"]),
-          funds: Decimal.new(trade["funds"])
-        }
-    end
+    if from do payload = payload ++ [from: from] end
+
+    body = build_api_request("/trades") |> set_payload(payload) |> gogogo!
+    body |> Enum.map &convert_trade/1
+  end
+
+  defp convert_trade(trade) do
+    %{
+      id: trade["id"], 
+      at: trade["at"], 
+      price: Decimal.new(trade["price"]), 
+      volume: Decimal.new(trade["volume"]),
+      side: String.to_atom(trade["side"]),
+      funds: Decimal.new(trade["funds"])
+    }
   end
 
   #############################################################################
