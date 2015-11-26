@@ -48,14 +48,15 @@ defmodule PeatioClient.Server do
   def handle_call({:orders_multi, market, orders}, _, state = %{auth: auth}) do
     payload = [market: market]
 
-    payload = orders |> Enum.reduce payload, fn
+    orders = orders |> Enum.reduce [], fn
       (%{price: p, side: s, volume: v}, acc) -> 
-        acc = acc ++ [{:"orders[][price]",  p}]
-        acc = acc ++ [{:"orders[][volume]", v}]
-        acc ++ [{:"orders[][side]",   s}]
+        acc = acc ++ [{:"orders[][price]", p}]
+        acc = acc ++ [{:"orders[][side]", s}]
+        acc ++ [{:"orders[][volume]", v}]
     end
 
     body = build_api_request("/orders/multi", :post)
+            |> set_multi(["orders[]": orders]) 
             |> set_payload(payload) 
             |> sign_request(auth)
             |> gogogo!
@@ -65,7 +66,7 @@ defmodule PeatioClient.Server do
 
   def handle_cast({:orders_cancel, id}, state = %{auth: auth}) when is_integer(id) do
     build_api_request("/order/delete", :post)
-    |> set_payload([id: id]) 
+    |> set_payload([id: id])
     |> sign_request(auth)
     |> gogogo!
 
@@ -115,7 +116,7 @@ defmodule PeatioClient.Server do
   def build_api_request(path, verb \\ :get, tonce \\ nil) when verb == :get or verb == :post do
     uri = api_uri(path)
     tonce = tonce || :os.system_time(:milli_seconds) 
-    %{uri: uri, tonce: tonce, verb: verb, payload: nil}
+    %{uri: uri, tonce: tonce, verb: verb, payload: nil, multi: []}
   end
 
   def set_payload(req = %{payload: nil}, payload) do
@@ -126,6 +127,18 @@ defmodule PeatioClient.Server do
     %{req | payload: payload ++ new_payload}
   end
 
+  def set_multi(req, multi) do
+    %{req | multi: req.multi ++ multi}
+  end
+
+  defp format_param({_, v}) when is_list(v) do
+    Enum.map_join v, "&", fn ({k, v}) -> "#{k}=#{v}" end
+  end
+
+  defp format_param({k, v}) do
+    "#{k}=#{v}"
+  end
+
   # REF: https://app.peatio.com/documents/api_v2#!/members/GET_version_members_me_format
   def sign_request(req, %{key: key, secret: secret}) do
     verb = req.verb |> Atom.to_string |> String.upcase
@@ -134,12 +147,15 @@ defmodule PeatioClient.Server do
               |> Dict.put(:access_key, key)
               |> Dict.put(:tonce, req.tonce)
 
-    query = Enum.sort(payload) |> Enum.map_join("&", fn {k, v} -> "#{k}=#{v}" end)
+    query = Enum.sort(payload ++ req.multi) |> Enum.map_join("&", &format_param/1)
 
     to_sign   = [verb, req.uri, query] |> Enum.join("|")
     signature = :crypto.hmac(:sha256, secret, to_sign) |> Base.encode16 |> String.downcase
 
-    %{req | payload: Dict.put(payload, :signature, signature)}
+    payload = Dict.put(payload, :signature, signature)
+    payload = req.multi |> Enum.reduce payload, fn ({_, v}, acc) -> acc ++ v end
+
+    %{req | payload: payload}
   end
 
   def gogogo!(%{uri: uri, verb: :get, payload: payload}) when is_list(payload) do
