@@ -4,7 +4,7 @@ defmodule PeatioClient.Mixfile do
   def project do
     [
       app: :peatio_client,
-      version: "1.2.2",
+      version: "1.2.3",
       elixir: "~> 1.1",
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
@@ -18,7 +18,7 @@ defmodule PeatioClient.Mixfile do
   #
   # Type "mix help compile.app" for more information
   def application do
-    [applications: [:logger, :httpoison]]
+    [applications: [:logger, :httpoison, :decimal, :poison]]
   end
 
   # Dependencies can be Hex packages:
