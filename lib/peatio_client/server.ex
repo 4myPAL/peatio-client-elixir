@@ -116,7 +116,7 @@ defmodule PeatioClient.Server do
   def build_api_request(path, verb \\ :get, tonce \\ nil) when verb == :get or verb == :post do
     uri = api_uri(path)
     tonce = tonce || :os.system_time(:milli_seconds) 
-    %{uri: uri, tonce: tonce, verb: verb, payload: nil, multi: []}
+    %{uri: uri, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 1000, retry: 5}
   end
 
   def set_payload(req = %{payload: nil}, payload) do
@@ -158,20 +158,39 @@ defmodule PeatioClient.Server do
     %{req | payload: payload}
   end
 
-  def gogogo!(%{uri: uri, verb: :get, payload: payload}) when is_list(payload) do
+  def gogogo!(%{retry: 0}) do
+    Logger.error "RETRY END"
+    raise "RETRY_END"
+  end
+
+  def gogogo!(req = %{uri: uri, verb: :get, payload: payload, timeout: timeout}) when is_list(payload) do
     Logger.debug "GET #{uri} #{inspect payload}"
-    payload = payload |> Enum.map(fn({k, v}) -> "#{k}=#{v}" end) |> Enum.join("&")
-    get!(uri <> "?" <> payload).body
+    payload_str = payload |> Enum.map(fn({k, v}) -> "#{k}=#{v}" end) |> Enum.join("&")
+
+    get(uri <> "?" <> payload_str, [], [{:timeout, timeout}])
+    |> process_response(req)
   end
 
-  def gogogo!(%{uri: uri, verb: :get, payload: _}) do
+  def gogogo!(req = %{uri: uri, verb: :get, payload: _, timeout: timeout}) do
     Logger.debug "GET #{uri}"
-    get!(uri).body
+    get(uri, [], [{:timeout, timeout}])
+    |> process_response(req)
   end
 
-  def gogogo!(%{uri: uri, verb: :post, payload: payload}) do
+  def gogogo!(req = %{uri: uri, verb: :post, payload: payload, timeout: timeout}) do
     Logger.debug "POST #{uri} #{inspect payload}"
-    post!(uri, {:form, payload}).body
+    post(uri, {:form, payload}, [], [{:timeout, timeout}])
+    |> process_response(req)
+  end
+
+  defp process_response(response, request) do
+    case response do
+      {:ok, %{status_code: 400, body: body}} ->
+        Logger.error "#{inspect body["error"]}"
+        %{error: body["error"]["code"]}
+      {:ok, %{body: body}} -> body
+      {:error, _} -> gogogo!(%{request|retry: request.retry - 1})
+    end
   end
 end
 

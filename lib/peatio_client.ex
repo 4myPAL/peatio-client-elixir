@@ -62,8 +62,10 @@ defmodule PeatioClient do
         %{price: price, side: :buy, volume: volume}
     end
 
-    GenServer.call(account_name(account), {:orders_multi, market, orders})
-    |> Enum.map &convert_order/1
+    case GenServer.call(account_name(account), {:orders_multi, market, orders}) do
+      response = %{error: _} -> response
+      body -> Enum.map(body, &convert_order/1)
+    end
   end
 
   def orders(account, market) do
