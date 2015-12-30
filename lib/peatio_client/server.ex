@@ -16,11 +16,18 @@ defmodule PeatioClient.Server do
     {:ok, %{auth: auth}}
   end
 
-  def handle_call(:members_me, _, state = %{auth: auth}) do
+  def handle_call(:members_accounts, _, state = %{auth: auth}) do
     body = build_api_request("/members/me")
             |> sign_request(auth)
             |> gogogo!
     {:reply, body, state} 
+  end
+
+  def handle_call(:members_me, _, state = %{auth: auth}) do
+    body = build_api_request("/members/me")
+            |> sign_request(auth)
+            |> gogogo!
+    {:reply, body, state}
   end
 
   def handle_call({:orders, market}, _, state = %{auth: auth}) do
@@ -116,7 +123,7 @@ defmodule PeatioClient.Server do
   def build_api_request(path, verb \\ :get, tonce \\ nil) when verb == :get or verb == :post do
     uri = api_uri(path)
     tonce = tonce || :os.system_time(:milli_seconds) 
-    %{uri: uri, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 1000, retry: 5}
+    %{uri: uri, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 3000, retry: 5}
   end
 
   def set_payload(req = %{payload: nil}, payload) do

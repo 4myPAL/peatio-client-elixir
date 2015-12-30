@@ -44,6 +44,19 @@ defmodule PeatioClient do
     GenServer.call account_name(account), :members_me
   end
 
+  def accounts(account) do
+    member_info = GenServer.call account_name(account), :members_me
+    member_info["accounts"] |> Enum.reduce %{}, fn
+      (account, acc) ->
+        locked = Decimal.new(account["locked"])
+        balance = Decimal.new(account["balance"])
+        amount = Decimal.add(locked, balance)
+        asset = String.to_atom account["currency"]
+        account = %{asset: asset, balance: balance, locked: locked, amount: amount}
+        Dict.put acc, asset, account
+    end
+  end
+
   def bid(account, market, orders) do
     orders = orders |> Enum.map fn {p, v} -> {:bid, p, v} end
     entry(account, market, orders)

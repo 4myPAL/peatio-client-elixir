@@ -4,7 +4,7 @@ defmodule PeatioClient.Mixfile do
   def project do
     [
       app: :peatio_client,
-      version: "1.2.4",
+      version: "1.2.5",
       elixir: "~> 1.1",
       build_embedded: Mix.env == :prod,
       start_permanent: Mix.env == :prod,
