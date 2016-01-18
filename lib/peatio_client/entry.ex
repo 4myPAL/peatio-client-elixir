@@ -1,60 +1,80 @@
 require Logger 
 
-defmodule PeatioClient.Server do
+defmodule PeatioClient.Entry do
   use HTTPoison.Base
   use GenServer
+
   #############################################################################
   ### GenServer Callback
   #############################################################################
 
-  def start_link(account, key, secret) do
+  def start_link(account, host, key \\ nil, secret \\ nil) do
     opts  = [name: account_name(account)]
-    GenServer.start_link(__MODULE__, %{key: key, secret: secret}, opts)
+
+    config = %{sign_request: sign_request(key, secret), host: host, key: key, secret: secret}
+             |> Dict.merge build_request(host)
+
+    GenServer.start_link(__MODULE__, config, opts)
   end
 
-  def init(auth) do
-    {:ok, %{auth: auth}}
+  def init(config) do
+    {:ok, config}
   end
 
-  def handle_call(:members_accounts, _, state = %{auth: auth}) do
-    body = build_api_request("/members/me")
-            |> sign_request(auth)
-            |> gogogo!
+  def handle_call({:ticker, market}, _, state) do
+    path = "/tickers/#{market}"
+    body = state.build_get.(path) |> gogogo!
+
     {:reply, body, state} 
   end
 
-  def handle_call(:members_me, _, state = %{auth: auth}) do
-    body = build_api_request("/members/me")
-            |> sign_request(auth)
+  def handle_call({:trades, market, from}, _, state) do
+    payload = [market: market]
+    if from do payload = payload ++ [from: from] end
+
+    body = state.build_get.("/trades")
+            |> set_payload(payload)
             |> gogogo!
+
+    {:reply, body, state} 
+  end
+
+  def handle_call(:members_accounts, _, state) do
+    body = state.build_get.("/members/me")
+            |> state.sign_request.()
+            |> gogogo!
+
+    {:reply, body, state} 
+  end
+
+
+  def handle_call(:members_me, _, state) do
+    body = state.build_get.("/members/me")
+            |> state.sign_request.()
+            |> gogogo!
+
     {:reply, body, state}
   end
 
-  def handle_call({:orders, market}, _, state = %{auth: auth}) do
-    payload = [market: market]
-
-    body = build_api_request("/orders")
-            |> set_payload(payload) 
-            |> sign_request(auth)
+  def handle_call({:orders, market}, _, state) do
+    body = state.build_get.("/orders")
+            |> set_payload([market: market])
+            |> state.sign_request.()
             |> gogogo!
 
     {:reply, body, state}
   end
   
-  def handle_call({:order, order_id}, _, state = %{auth: auth}) do
-    payload = [id: order_id]
-
-    body = build_api_request("/order")
-            |> set_payload(payload) 
-            |> sign_request(auth)
+  def handle_call({:order, order_id}, _, state) do
+    body = state.build_get.("/order")
+            |> set_payload([id: order_id])
+            |> state.sign_request.()
             |> gogogo!
 
     {:reply, body, state}
   end
 
-  def handle_call({:orders_multi, market, orders}, _, state = %{auth: auth}) do
-    payload = [market: market]
-
+  def handle_call({:orders_multi, market, orders}, _, state) do
     orders = orders |> Enum.reduce [], fn
       (%{price: p, side: s, volume: v}, acc) -> 
         acc = acc ++ [{:"orders[][price]", p}]
@@ -62,34 +82,34 @@ defmodule PeatioClient.Server do
         acc ++ [{:"orders[][volume]", v}]
     end
 
-    body = build_api_request("/orders/multi", :post)
+    body = state.build_post.("/orders/multi")
             |> set_multi(["orders[]": orders]) 
-            |> set_payload(payload) 
-            |> sign_request(auth)
+            |> set_payload([market: market])
+            |> state.sign_request.()
             |> gogogo!
 
     {:reply, body, state}
   end
 
-  def handle_cast({:orders_cancel, id}, state = %{auth: auth}) when is_integer(id) do
-    build_api_request("/order/delete", :post)
+  def handle_cast({:orders_cancel, id}, state) when is_integer(id) do
+    state.build_post.("/order/delete")
     |> set_payload([id: id])
-    |> sign_request(auth)
+    |> state.sign_request.()
     |> gogogo!
 
     {:noreply, state}
   end
 
-  def handle_cast({:orders_cancel, side}, state = %{auth: auth}) do
+  def handle_cast({:orders_cancel, side}, state) do
     payload = case side do
       :ask -> [side: "sell"]
       :bid -> [side: "buy"]
       _ -> []
     end
 
-    build_api_request("/orders/clear", :post)
+    state.build_post.("/orders/clear")
     |> set_payload(payload) 
-    |> sign_request(auth)
+    |> state.sign_request.()
     |> gogogo!
 
     {:noreply, state}
@@ -99,11 +119,6 @@ defmodule PeatioClient.Server do
   ### HTTPoison Callback and Helper
   #############################################################################
 
-  defp process_url(url) do
-    host = Application.get_env(:peatio_client, :host) || System.get_env("HOST") || "https://app.peatio.com"
-    host <> url
-  end
-
   defp process_response_body(body) do
     body |> Poison.decode!
   end
@@ -112,18 +127,46 @@ defmodule PeatioClient.Server do
   ### Helper and Private
   #############################################################################
 
-  defp api_uri(path) do
-    "/api/v2" <> path
-  end
-
-  def account_name(account) do
+  defp account_name(account) do
     String.to_atom "#{account}.api.peatio.com"
   end
 
-  def build_api_request(path, verb \\ :get, tonce \\ nil) when verb == :get or verb == :post do
-    uri = api_uri(path)
-    tonce = tonce || :os.system_time(:milli_seconds) 
+  defp build_request(host) do
+    base_path = host <> "/api/v2"
+
+    build_get = fn(path) -> build_request(base_path <> path, :get) end
+    build_post = fn(path) -> build_request(base_path <> path, :post) end
+    %{build_get: build_get, build_post: build_post}
+  end
+
+  defp build_request(uri, verb) when verb == :get or verb == :post do
+    tonce = :os.system_time(:milli_seconds) 
     %{uri: uri, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 3000, retry: 5}
+  end
+
+  defp sign_request(nil, nil) do
+    fn(_) -> raise "This client api is only for public." end
+  end
+
+  # REF: https://app.peatio.com/documents/api_v2#!/members/GET_version_members_me_format
+  defp sign_request(key, secret) do
+    fn(req) ->
+      verb = req.verb |> Atom.to_string |> String.upcase
+
+      payload = (req.payload || [])
+                |> Dict.put(:access_key, key)
+                |> Dict.put(:tonce, req.tonce)
+
+      query = Enum.sort(payload ++ req.multi) |> Enum.map_join("&", &format_param/1)
+
+      to_sign   = [verb, req.uri, query] |> Enum.join("|")
+      signature = :crypto.hmac(:sha256, secret, to_sign) |> Base.encode16 |> String.downcase
+
+      payload = Dict.put(payload, :signature, signature)
+      payload = req.multi |> Enum.reduce payload, fn ({_, v}, acc) -> acc ++ v end
+
+      %{req | payload: payload}
+    end
   end
 
   def set_payload(req = %{payload: nil}, payload) do
@@ -144,25 +187,6 @@ defmodule PeatioClient.Server do
 
   defp format_param({k, v}) do
     "#{k}=#{v}"
-  end
-
-  # REF: https://app.peatio.com/documents/api_v2#!/members/GET_version_members_me_format
-  def sign_request(req, %{key: key, secret: secret}) do
-    verb = req.verb |> Atom.to_string |> String.upcase
-
-    payload = (req.payload || [])
-              |> Dict.put(:access_key, key)
-              |> Dict.put(:tonce, req.tonce)
-
-    query = Enum.sort(payload ++ req.multi) |> Enum.map_join("&", &format_param/1)
-
-    to_sign   = [verb, req.uri, query] |> Enum.join("|")
-    signature = :crypto.hmac(:sha256, secret, to_sign) |> Base.encode16 |> String.downcase
-
-    payload = Dict.put(payload, :signature, signature)
-    payload = req.multi |> Enum.reduce payload, fn ({_, v}, acc) -> acc ++ v end
-
-    %{req | payload: payload}
   end
 
   def gogogo!(%{retry: 0}) do

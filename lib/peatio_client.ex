@@ -1,12 +1,12 @@
 defmodule PeatioClient do
-  import PeatioClient.Server
 
   #############################################################################
   ### PEATIO Public API
   #############################################################################
 
-  def ticker(market) do
-    body = build_api_request("/tickers/#{market}") |> gogogo!
+  def ticker(account, market) do
+    body = GenServer.call(account_name(account), {:ticker, market})
+
     ticker = body |> Map.get("ticker") |> Enum.reduce %{}, fn
       ({key, val}, acc) ->
         key = key |> filter_key |> String.to_atom
@@ -16,24 +16,9 @@ defmodule PeatioClient do
     Map.put ticker, :at, body["at"]
   end
 
-  def trades(market, from \\ nil) do
-    payload = [market: market]
-
-    if from do payload = payload ++ [from: from] end
-
-    body = build_api_request("/trades") |> set_payload(payload) |> gogogo!
-    body |> Enum.map &convert_trade/1
-  end
-
-  defp convert_trade(trade) do
-    %{
-      id: trade["id"], 
-      at: trade["at"], 
-      price: Decimal.new(trade["price"]), 
-      volume: Decimal.new(trade["volume"]),
-      side: String.to_atom(trade["side"]),
-      funds: Decimal.new(trade["funds"])
-    }
+  def trades(account, market, from \\ nil) do
+    GenServer.call(account_name(account), {:trades, market, from})
+    |> Enum.map &convert_trade/1
   end
 
   #############################################################################
@@ -133,5 +118,20 @@ defmodule PeatioClient do
 
   defp convert_order(order) when is_map(order) do
     for {key, val} <- order, into: %{}, do: {String.to_atom(key), filter_order_val(key, val)}
+  end
+
+  defp convert_trade(trade) do
+    %{
+      id: trade["id"], 
+      at: trade["at"], 
+      price: Decimal.new(trade["price"]), 
+      volume: Decimal.new(trade["volume"]),
+      side: String.to_atom(trade["side"]),
+      funds: Decimal.new(trade["funds"])
+    }
+  end
+
+  defp account_name(account) do
+    String.to_atom "#{account}.api.peatio.com"
   end
 end
