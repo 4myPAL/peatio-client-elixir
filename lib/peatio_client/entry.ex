@@ -132,16 +132,14 @@ defmodule PeatioClient.Entry do
   end
 
   defp build_request(host) do
-    base_path = host <> "/api/v2"
-
-    build_get = fn(path) -> build_request(base_path <> path, :get) end
-    build_post = fn(path) -> build_request(base_path <> path, :post) end
+    build_get = fn(path) -> build_request(host, "/api/v2" <> path, :get) end
+    build_post = fn(path) -> build_request(host, "/api/v2" <> path, :post) end
     %{build_get: build_get, build_post: build_post}
   end
 
-  defp build_request(uri, verb) when verb == :get or verb == :post do
+  defp build_request(host, path, verb) when verb == :get or verb == :post do
     tonce = :os.system_time(:milli_seconds) 
-    %{uri: uri, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 3000, retry: 5}
+    %{uri: host <> path, path: path, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 3000, retry: 5}
   end
 
   defp sign_request(nil, nil) do
@@ -159,7 +157,7 @@ defmodule PeatioClient.Entry do
 
       query = Enum.sort(payload ++ req.multi) |> Enum.map_join("&", &format_param/1)
 
-      to_sign   = [verb, req.uri, query] |> Enum.join("|")
+      to_sign   = [verb, req.path, query] |> Enum.join("|")
       signature = :crypto.hmac(:sha256, secret, to_sign) |> Base.encode16 |> String.downcase
 
       payload = Dict.put(payload, :signature, signature)
