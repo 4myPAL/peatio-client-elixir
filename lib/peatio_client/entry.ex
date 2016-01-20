@@ -91,7 +91,7 @@ defmodule PeatioClient.Entry do
     {:reply, body, state}
   end
 
-  def handle_call({:orders_cancel, side}, state) do
+  def handle_call({:orders_cancel, side}, _, state) do
     do_orders_cancel(side, state)
     {:reply, :ok, state}
   end
@@ -235,7 +235,7 @@ defmodule PeatioClient.Entry do
         %{error: body["error"]["code"]}
       {:ok, %{body: body}} -> body
       {:error, reason} ->
-        err("REQ ERROR #{reason}")
+        err("REQ ERROR #{inspect reason}")
         gogogo!(%{request|retry: request.retry - 1})
     end
   end
