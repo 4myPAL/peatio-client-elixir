@@ -5,7 +5,7 @@ defmodule PeatioClient do
   #############################################################################
 
   def ticker(account, market) do
-    body = GenServer.call(account_name(account), {:ticker, market})
+    body = call_api(account, {:ticker, market})
 
     ticker = body |> Map.get("ticker") |> Enum.reduce %{}, fn
       ({key, val}, acc) ->
@@ -17,7 +17,7 @@ defmodule PeatioClient do
   end
 
   def trades(account, market, from \\ nil) do
-    GenServer.call(account_name(account), {:trades, market, from})
+    call_api(account, {:trades, market, from})
     |> Enum.map &convert_trade/1
   end
 
@@ -26,11 +26,11 @@ defmodule PeatioClient do
   #############################################################################
 
   def me(account) do
-    GenServer.call account_name(account), :members_me
+    call_api(account, :members_me)
   end
 
   def accounts(account) do
-    member_info = GenServer.call account_name(account), :members_me
+    member_info = call_api(account, :members_me)
     member_info["accounts"] |> Enum.reduce %{}, fn
       (account, acc) ->
         locked = Decimal.new(account["locked"])
@@ -60,19 +60,19 @@ defmodule PeatioClient do
         %{price: price, side: :buy, volume: volume}
     end
 
-    case GenServer.call(account_name(account), {:orders_multi, market, orders}) do
+    case call_api(account, {:orders_multi, market, orders}) do
       response = %{error: _} -> response
       body -> Enum.map(body, &convert_order/1)
     end
   end
 
   def orders(account, market) do
-    GenServer.call(account_name(account), {:orders, market})
+    call_api(account, {:orders, market})
     |> Enum.map &convert_order/1
   end
 
   def order(account, order_id) do
-    GenServer.call(account_name(account), {:order, order_id})
+    call_api(account, {:order, order_id})
     |> convert_order
   end
 
@@ -89,7 +89,11 @@ defmodule PeatioClient do
   end
 
   def cancel_bid(account) do
-    GenServer.call(account_name(account), {:orders_cancel, :bid})
+    GenServer.cast(account_name(account), {:orders_cancel, :bid})
+  end
+
+  defp call_api(account, payload) do
+    GenServer.call(account_name(account), payload, :infinity)
   end
 
   #############################################################################
