@@ -91,6 +91,11 @@ defmodule PeatioClient.Entry do
     {:reply, body, state}
   end
 
+  def handle_call({:orders_cancel, side}, state) do
+    do_orders_cancel(side, state)
+    {:reply, :ok, state}
+  end
+
   def handle_cast({:orders_cancel, id}, state) when is_integer(id) do
     state.build_post.("/order/delete")
     |> set_payload([id: id])
@@ -101,6 +106,23 @@ defmodule PeatioClient.Entry do
   end
 
   def handle_cast({:orders_cancel, side}, state) do
+    do_orders_cancel(side, state)
+    {:noreply, state}
+  end
+
+  #############################################################################
+  ### HTTPoison Callback and Helper
+  #############################################################################
+
+  defp process_response_body(body) do
+    body |> Poison.decode!
+  end
+
+  #############################################################################
+  ### Helper and Private
+  #############################################################################
+
+  defp do_orders_cancel(side, state) do
     payload = case side do
       :ask -> [side: "sell"]
       :bid -> [side: "buy"]
@@ -118,20 +140,8 @@ defmodule PeatioClient.Entry do
       _    -> log("CANCEL ALL ORDERS")
     end
 
-    {:noreply, state}
+    state
   end
-
-  #############################################################################
-  ### HTTPoison Callback and Helper
-  #############################################################################
-
-  defp process_response_body(body) do
-    body |> Poison.decode!
-  end
-
-  #############################################################################
-  ### Helper and Private
-  #############################################################################
 
   defp account_name(account) do
     String.to_atom "#{account}.api.peatio.com"

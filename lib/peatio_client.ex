@@ -92,6 +92,18 @@ defmodule PeatioClient do
     GenServer.cast(account_name(account), {:orders_cancel, :bid})
   end
 
+  def cancel_all_async(account) do
+    call_api(account, {:orders_cancel, :all})
+  end
+
+  def cancel_ask_async(account) do
+    call_api(account, {:orders_cancel, :ask})
+  end
+
+  def cancel_bid_async(account) do
+    call_api(account, {:orders_cancel, :bid})
+  end
+
   defp call_api(account, payload) do
     GenServer.call(account_name(account), payload, :infinity)
   end
