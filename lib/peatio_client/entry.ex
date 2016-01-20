@@ -112,6 +112,12 @@ defmodule PeatioClient.Entry do
     |> state.sign_request.()
     |> gogogo!
 
+    case side do
+      :ask -> log("CANCEL ASK ORDERS")
+      :bid -> log("CANCEL BID ORDERS")
+      _    -> log("CANCEL ALL ORDERS")
+    end
+
     {:noreply, state}
   end
 
@@ -139,7 +145,7 @@ defmodule PeatioClient.Entry do
 
   defp build_request(host, path, verb) when verb == :get or verb == :post do
     tonce = :os.system_time(:milli_seconds) 
-    %{uri: host <> path, path: path, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 3000, retry: 5}
+    %{uri: host <> path, path: path, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 30000, retry: 3}
   end
 
   defp sign_request(nil, nil) do
@@ -215,11 +221,21 @@ defmodule PeatioClient.Entry do
   defp process_response(response, request) do
     case response do
       {:ok, %{status_code: 400, body: body}} ->
-        Logger.error "#{inspect body["error"]}"
+        err(body["error"])
         %{error: body["error"]["code"]}
       {:ok, %{body: body}} -> body
-      {:error, _} -> gogogo!(%{request|retry: request.retry - 1})
+      {:error, reason} ->
+        err("REQ ERROR #{reason}")
+        gogogo!(%{request|retry: request.retry - 1})
     end
+  end
+
+  defp err(message, name \\ :api) do
+    Logger.error "PEATIO CLIENT #{name}: #{message}" 
+  end
+
+  defp log(message, name \\ :api) do
+    Logger.info "PEATIO CLIENT #{name}: #{inspect message}" 
   end
 end
 
