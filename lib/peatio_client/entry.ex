@@ -9,7 +9,7 @@ defmodule PeatioClient.Entry do
   #############################################################################
 
   def start_link(account, host, key \\ nil, secret \\ nil) do
-    opts  = [name: account_name(account)]
+    opts  = [name: entry_id(account)]
 
     config = %{sign_request: sign_request(key, secret), host: host, key: key, secret: secret}
              |> Dict.merge build_request(host)
@@ -143,8 +143,8 @@ defmodule PeatioClient.Entry do
     state
   end
 
-  defp account_name(account) do
-    String.to_atom "#{account}.api.peatio.com"
+  defp entry_id(api) do
+    String.to_atom "#{api}.peatio.com"
   end
 
   defp build_request(host) do
