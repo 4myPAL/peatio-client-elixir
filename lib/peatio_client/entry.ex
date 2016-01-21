@@ -92,8 +92,8 @@ defmodule PeatioClient.Entry do
   end
 
   def handle_call({:orders_cancel, side}, _, state) do
-    do_orders_cancel(side, state)
-    {:reply, :ok, state}
+    result = do_orders_cancel(side, state)
+    {:reply, result, state}
   end
 
   def handle_cast({:orders_cancel, id}, state) when is_integer(id) do
@@ -129,10 +129,11 @@ defmodule PeatioClient.Entry do
       _ -> []
     end
 
-    state.build_post.("/orders/clear")
-    |> set_payload(payload) 
-    |> state.sign_request.()
-    |> gogogo!
+    result = 
+      state.build_post.("/orders/clear")
+      |> set_payload(payload) 
+      |> state.sign_request.()
+      |> gogogo!
 
     case side do
       :ask -> log("CANCEL ASK ORDERS")
@@ -140,7 +141,7 @@ defmodule PeatioClient.Entry do
       _    -> log("CANCEL ALL ORDERS")
     end
 
-    state
+    result
   end
 
   defp entry_id(api) do
@@ -203,11 +204,6 @@ defmodule PeatioClient.Entry do
     "#{k}=#{v}"
   end
 
-  def gogogo!(%{retry: 0}) do
-    Logger.error "RETRY END"
-    raise "RETRY_END"
-  end
-
   def gogogo!(req = %{uri: uri, verb: :get, payload: payload, timeout: timeout}) when is_list(payload) do
     Logger.debug "GET #{uri} #{inspect payload}"
     payload_str = payload |> Enum.map(fn({k, v}) -> "#{k}=#{v}" end) |> Enum.join("&")
@@ -230,20 +226,15 @@ defmodule PeatioClient.Entry do
 
   defp process_response(response, request) do
     case response do
-      {:ok, %{body: body}} ->
-        body
-      {:ok, %{status_code: 400, body: body}} ->
-        err(body["error"])
-        %{error: body["error"]["code"]}
+      {:ok, %{status_code: 200, body: body}} -> {:ok, body}
+      {:ok, %{status_code: 201, body: body}} -> {:ok, body}
+      {:ok, %{status_code: code, body: body}} ->
+        {:error, %{error: body["error"]["code"], message: body["error"]["message"], status_code: code}}
       {:error, reason} ->
-        err("HTTP CLIENT REQ #{inspect request}")
-        err("HTTP CLIENT ERROR #{inspect reason}")
-        %{error: reason}
+        Logger.debug("HTTP CLIENT REQ #{inspect request}")
+        Logger.debug("HTTP CLIENT ERROR #{inspect reason}")
+        {:error, %{error: :client_error, reason: reason}}
     end
-  end
-
-  defp err(message, name \\ :api) do
-    Logger.error "PEATIO CLIENT #{name}: #{inspect message}" 
   end
 
   defp log(message, name \\ :api) do

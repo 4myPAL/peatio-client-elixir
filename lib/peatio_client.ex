@@ -5,20 +5,21 @@ defmodule PeatioClient do
   #############################################################################
 
   def ticker(account, market) do
-    body = call(account, {:ticker, market})
-
-    ticker = body |> Map.get("ticker") |> Enum.reduce %{}, fn
-      ({key, val}, acc) ->
-        key = key |> filter_key |> String.to_atom
-        val = val |> Decimal.new
-        Map.put(acc, key, val)
-    end
-    Map.put ticker, :at, body["at"]
+    call(account, {:ticker, market}, fn body ->
+      ticker = body |> Map.get("ticker") |> Enum.reduce %{}, fn
+        ({key, val}, acc) ->
+          key = key |> filter_key |> String.to_atom
+          val = val |> Decimal.new
+          Map.put(acc, key, val)
+      end
+      Map.put ticker, :at, body["at"]
+    end)
   end
 
   def trades(api, market, from \\ nil) do
-    call(api, {:trades, market, from})
-    |> Enum.map &convert_trade/1
+    call(api, {:trades, market, from}, fn body ->
+      body |> Enum.map &convert_trade/1
+    end)
   end
 
   #############################################################################
@@ -30,14 +31,15 @@ defmodule PeatioClient do
   end
 
   def accounts(api) do
-    member_info = call(api, :members_me)
-    member_info["accounts"] |> Enum.reduce(%{}, fn account, acc ->
-      locked = Decimal.new(account["locked"])
-      balance = Decimal.new(account["balance"])
-      amount = Decimal.add(locked, balance)
-      asset = String.to_atom account["currency"]
-      account = %{asset: asset, balance: balance, locked: locked, amount: amount}
-      Dict.put acc, asset, account
+    call(api, :members_me, fn member_info ->
+      member_info["accounts"] |> Enum.reduce(%{}, fn account, acc ->
+        locked = Decimal.new(account["locked"])
+        balance = Decimal.new(account["balance"])
+        amount = Decimal.add(locked, balance)
+        asset = String.to_atom account["currency"]
+        account = %{asset: asset, balance: balance, locked: locked, amount: amount}
+        Dict.put acc, asset, account
+      end)
     end)
   end
 
@@ -59,52 +61,54 @@ defmodule PeatioClient do
         %{price: price, side: :buy, volume: volume}
     end
 
-    case call(api, {:orders_multi, market, orders}) do
-      response = %{error: _} -> response
-      body -> Enum.map(body, &convert_order/1)
-    end
+    call(api, {:orders_multi, market, orders}, fn orders ->
+      orders |> Enum.map(&convert_order/1)
+    end)
   end
 
   def orders(api, market) do
-    call(api, {:orders, market})
-    |> Enum.map &convert_order/1
+    call(api, {:orders, market}, fn orders ->
+      orders |> Enum.map(&convert_order/1)
+    end)
   end
 
   def order(api, order_id) do
-    call(api, {:order, order_id})
-    |> convert_order
+    call(api, {:order, order_id}, fn order ->
+      order |> convert_order
+    end)
   end
 
-  def cancel(api, id) when is_integer(id) do
-    cast(api, {:orders_cancel, id})
+  def cancel(api, id, way \\ :sync) when is_integer(id) do
+    do_cancel(api, id, way)
   end
 
-  def cancel_all(api) do
-    cast(api, {:orders_cancel, :all})
+  def cancel_all(api, way \\ :sync) do
+    do_cancel(api, :all, way)
   end
 
-  def cancel_ask(api) do
-    cast(api, {:orders_cancel, :ask})
+  def cancel_ask(api, way \\ :sync) do
+    do_cancel(api, :ask, way)
   end
 
-  def cancel_bid(api) do
-    cast(api, {:orders_cancel, :bid})
+  def cancel_bid(api, way \\ :sync) do
+    do_cancel(api, :bid, way)
   end
 
-  def cancel_all_async(api) do
-    call(api, {:orders_cancel, :all})
+  defp do_cancel(api, payload, way) do
+    case way do
+      :sync -> call(api, {:orders_cancel, payload})
+      :async -> cast(api, {:orders_cancel, payload})
+    end
   end
 
-  def cancel_ask_async(api) do
-    call(api, {:orders_cancel, :ask})
-  end
+  defp empty_callback(r), do: r
 
-  def cancel_bid_async(api) do
-    call(api, {:orders_cancel, :bid})
-  end
+  defp callback(:ok, callback),              do: callback.(:ok)
+  defp callback({:ok, data}, callback),      do: callback.(data)
+  defp callback({:error, error}, _callback), do: error
 
-  defp call(api, payload) do
-    GenServer.call(entry_id(api), payload, :infinity)
+  defp call(api, payload, callback \\ &empty_callback/1) do
+    GenServer.call(entry_id(api), payload, :infinity) |> callback(callback)
   end
 
   defp cast(api, payload) do
