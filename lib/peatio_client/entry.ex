@@ -155,7 +155,7 @@ defmodule PeatioClient.Entry do
 
   defp build_request(host, path, verb) when verb == :get or verb == :post do
     tonce = :os.system_time(:milli_seconds) 
-    %{uri: host <> path, path: path, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 30000, retry: 3}
+    %{uri: host <> path, path: path, tonce: tonce, verb: verb, payload: nil, multi: [], timeout: 30000, retry: 1}
   end
 
   defp sign_request(nil, nil) do
@@ -212,36 +212,38 @@ defmodule PeatioClient.Entry do
     Logger.debug "GET #{uri} #{inspect payload}"
     payload_str = payload |> Enum.map(fn({k, v}) -> "#{k}=#{v}" end) |> Enum.join("&")
 
-    get(uri <> "?" <> payload_str, [], [{:timeout, timeout}])
+    get(uri <> "?" <> payload_str, [], [{:timeout, timeout}, {:recv_timeout, timeout}])
     |> process_response(req)
   end
 
   def gogogo!(req = %{uri: uri, verb: :get, payload: _, timeout: timeout}) do
     Logger.debug "GET #{uri}"
-    get(uri, [], [{:timeout, timeout}])
+    get(uri, [], [{:timeout, timeout}, {:recv_timeout, timeout}])
     |> process_response(req)
   end
 
   def gogogo!(req = %{uri: uri, verb: :post, payload: payload, timeout: timeout}) do
     Logger.debug "POST #{uri} #{inspect payload}"
-    post(uri, {:form, payload}, [], [{:timeout, timeout}])
+    post(uri, {:form, payload}, [], [{:timeout, timeout}, {:recv_timeout, timeout}])
     |> process_response(req)
   end
 
   defp process_response(response, request) do
     case response do
+      {:ok, %{body: body}} ->
+        body
       {:ok, %{status_code: 400, body: body}} ->
         err(body["error"])
         %{error: body["error"]["code"]}
-      {:ok, %{body: body}} -> body
       {:error, reason} ->
-        err("REQ ERROR #{inspect reason}")
-        gogogo!(%{request|retry: request.retry - 1})
+        err("HTTP CLIENT REQ #{inspect request}")
+        err("HTTP CLIENT ERROR #{inspect reason}")
+        %{error: reason}
     end
   end
 
   defp err(message, name \\ :api) do
-    Logger.error "PEATIO CLIENT #{name}: #{message}" 
+    Logger.error "PEATIO CLIENT #{name}: #{inspect message}" 
   end
 
   defp log(message, name \\ :api) do
