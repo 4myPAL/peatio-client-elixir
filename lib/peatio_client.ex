@@ -5,7 +5,7 @@ defmodule PeatioClient do
   #############################################################################
 
   def ticker(account, market) do
-    body = call_api(account, {:ticker, market})
+    body = call(account, {:ticker, market})
 
     ticker = body |> Map.get("ticker") |> Enum.reduce %{}, fn
       ({key, val}, acc) ->
@@ -16,8 +16,8 @@ defmodule PeatioClient do
     Map.put ticker, :at, body["at"]
   end
 
-  def trades(account, market, from \\ nil) do
-    call_api(account, {:trades, market, from})
+  def trades(api, market, from \\ nil) do
+    call(api, {:trades, market, from})
     |> Enum.map &convert_trade/1
   end
 
@@ -25,34 +25,33 @@ defmodule PeatioClient do
   ### PEATIO Private API
   #############################################################################
 
-  def me(account) do
-    call_api(account, :members_me)
+  def me(api) do
+    call(api, :members_me)
   end
 
-  def accounts(account) do
-    member_info = call_api(account, :members_me)
-    member_info["accounts"] |> Enum.reduce %{}, fn
-      (account, acc) ->
-        locked = Decimal.new(account["locked"])
-        balance = Decimal.new(account["balance"])
-        amount = Decimal.add(locked, balance)
-        asset = String.to_atom account["currency"]
-        account = %{asset: asset, balance: balance, locked: locked, amount: amount}
-        Dict.put acc, asset, account
-    end
+  def accounts(api) do
+    member_info = call(api, :members_me)
+    member_info["accounts"] |> Enum.reduce(%{}, fn account, acc ->
+      locked = Decimal.new(account["locked"])
+      balance = Decimal.new(account["balance"])
+      amount = Decimal.add(locked, balance)
+      asset = String.to_atom account["currency"]
+      account = %{asset: asset, balance: balance, locked: locked, amount: amount}
+      Dict.put acc, asset, account
+    end)
   end
 
-  def bid(account, market, orders) do
+  def bid(api, market, orders) do
     orders = orders |> Enum.map fn {p, v} -> {:bid, p, v} end
-    entry(account, market, orders)
+    entry_orders(api, market, orders)
   end
 
-  def ask(account, market, orders) do
+  def ask(api, market, orders) do
     orders = orders |> Enum.map fn {p, v} -> {:ask, p, v} end
-    entry(account, market, orders)
+    entry_orders(api, market, orders)
   end
 
-  def entry(account, market, orders) do
+  def entry_orders(api, market, orders) do
     orders = orders |> Enum.map fn
       ({:ask, price, volume}) ->
         %{price: price, side: :sell, volume: volume}
@@ -60,52 +59,56 @@ defmodule PeatioClient do
         %{price: price, side: :buy, volume: volume}
     end
 
-    case call_api(account, {:orders_multi, market, orders}) do
+    case call(api, {:orders_multi, market, orders}) do
       response = %{error: _} -> response
       body -> Enum.map(body, &convert_order/1)
     end
   end
 
-  def orders(account, market) do
-    call_api(account, {:orders, market})
+  def orders(api, market) do
+    call(api, {:orders, market})
     |> Enum.map &convert_order/1
   end
 
-  def order(account, order_id) do
-    call_api(account, {:order, order_id})
+  def order(api, order_id) do
+    call(api, {:order, order_id})
     |> convert_order
   end
 
-  def cancel(account, id) when is_integer(id) do
-    GenServer.cast(account_name(account), {:orders_cancel, id})
+  def cancel(api, id) when is_integer(id) do
+    cast(api, {:orders_cancel, id})
   end
 
-  def cancel_all(account) do
-    GenServer.cast(account_name(account), {:orders_cancel, :all})
+  def cancel_all(api) do
+    cast(api, {:orders_cancel, :all})
   end
 
-  def cancel_ask(account) do
-    GenServer.cast(account_name(account), {:orders_cancel, :ask})
+  def cancel_ask(api) do
+    cast(api, {:orders_cancel, :ask})
   end
 
-  def cancel_bid(account) do
-    GenServer.cast(account_name(account), {:orders_cancel, :bid})
+  def cancel_bid(api) do
+    cast(api, {:orders_cancel, :bid})
   end
 
-  def cancel_all_async(account) do
-    call_api(account, {:orders_cancel, :all})
+  def cancel_all_async(api) do
+    call(api, {:orders_cancel, :all})
   end
 
-  def cancel_ask_async(account) do
-    call_api(account, {:orders_cancel, :ask})
+  def cancel_ask_async(api) do
+    call(api, {:orders_cancel, :ask})
   end
 
-  def cancel_bid_async(account) do
-    call_api(account, {:orders_cancel, :bid})
+  def cancel_bid_async(api) do
+    call(api, {:orders_cancel, :bid})
   end
 
-  defp call_api(account, payload) do
-    GenServer.call(account_name(account), payload, :infinity)
+  defp call(api, payload) do
+    GenServer.call(entry_id(api), payload, :infinity)
+  end
+
+  defp cast(api, payload) do
+    GenServer.cast(entry_id(api), payload)
   end
 
   #############################################################################
@@ -147,7 +150,7 @@ defmodule PeatioClient do
     }
   end
 
-  defp account_name(account) do
-    String.to_atom "#{account}.api.peatio.com"
+  defp entry_id(api) do
+    String.to_atom "#{api}.peatio.com"
   end
 end
